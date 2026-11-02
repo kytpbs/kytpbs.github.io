@@ -10,8 +10,17 @@ const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /* ================= Viewer (pop-up with iframe) ================= */
 const viewer = $('#viewer');
-const frame = $('#viewer-frame');
 const body = viewer.querySelector('.viewer-body');
+// The iframe is rebuilt for every project and removed on close. Changing an existing
+// iframe's src adds entries to the tab's history, which made "back" navigate the
+// iframe (to a blank page / stopping the video) instead of closing the pop-up.
+const frameTemplate = $('#viewer-frame');
+frameTemplate.remove();
+let frame = null;
+function removeFrame() {
+  if (frame) frame.remove(); // also stops video/audio
+  frame = null;
+}
 let current = null;
 let closeTimer = 0;
 
@@ -23,8 +32,16 @@ function showViewer(p) {
   $('#viewer-ext').href = p.external;
   body.classList.toggle('video', !!p.video);
   body.classList.remove('loaded');
+  removeFrame();
+  frame = frameTemplate.cloneNode();
   frame.title = p.title;
-  frame.src = p.url;
+  frame.src = p.url; // set before inserting so no history entry is created
+  frame.addEventListener('load', () => {
+    body.classList.add('loaded');
+    // hand keyboard focus to the project so Space / arrows scroll it
+    if (current === p && viewer.contains(document.activeElement)) frame.focus();
+  }, { once: true });
+  body.appendChild(frame);
   viewer.hidden = false;
   requestAnimationFrame(() => requestAnimationFrame(() => viewer.classList.add('open')));
   document.title = `${p.title} · Kaya Topbaş`;
@@ -36,16 +53,12 @@ function hideViewer() {
   current = null;
   viewer.classList.remove('open');
   document.title = 'Kaya Topbaş · Portfolio';
+  removeFrame();
   closeTimer = setTimeout(() => {
     viewer.hidden = true;
-    frame.src = 'about:blank'; // stops video/audio
   }, reducedMotion ? 0 : 350);
   onViewerClosed();
 }
-
-frame.addEventListener('load', () => {
-  if (frame.src !== 'about:blank') body.classList.add('loaded');
-});
 
 // History integration: phone back button / swipe-back closes the pop-up
 function openProject(id, { push = true } = {}) {
@@ -60,7 +73,10 @@ function openProject(id, { push = true } = {}) {
 }
 
 function requestClose() {
-  if (history.state && history.state.project) history.back();
+  if (history.state && history.state.project) {
+    hideViewer(); // drop the iframe first so "back" can only pop our own entry
+    history.back();
+  }
   else {
     history.replaceState(null, '', location.pathname + location.search);
     hideViewer();
